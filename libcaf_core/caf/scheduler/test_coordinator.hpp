@@ -25,21 +25,24 @@
 #include <deque>
 #include <chrono>
 #include <cstddef>
+#include <algorithm>
 
 #include "caf/scheduler/abstract_coordinator.hpp"
 
 namespace caf {
 namespace scheduler {
 
-/// Coordinator for testing purposes.
+/// A schedule coordinator for testing purposes.
 class test_coordinator : public abstract_coordinator {
 public:
   using super = abstract_coordinator;
 
   test_coordinator(actor_system& sys);
 
+  /// A double-ended queue representing our current job queue.
   std::deque<resumable*> jobs;
 
+  /// A scheduled message or timeout.
   struct delayed_msg {
     strong_actor_ptr from;
     strong_actor_ptr to;
@@ -47,15 +50,43 @@ public:
     message msg;
   };
 
+  /// A clock type using the highest available precision.
   using hrc = std::chrono::high_resolution_clock;
 
+  /// A map type for storing scheduled messages and timeouts.
   std::multimap<hrc::time_point, delayed_msg> delayed_messages;
 
+  /// Returns whether at least one job is in the queue.
+  inline bool has_job() const {
+    return !jobs.empty();
+  }
+
+  /// Returns the next element from the job queue as type `T`.
   template <class T = resumable>
   T& next_job() {
     if (jobs.empty())
       CAF_RAISE_ERROR("jobs.empty())");
     return dynamic_cast<T&>(*jobs.front());
+  }
+
+  /// Puts `x` at the front of the queue unless it cannot be found in the queue.
+  /// Returns `true` if `x` exists in the queue and was put in front, `false`
+  /// otherwise.
+  template <class Handle>
+  bool prioritize(const Handle& x) {
+    auto ptr = dynamic_cast<resumable*>(actor_cast<abstract_actor*>(x));
+    if (!ptr)
+      return false;
+    auto b = jobs.begin();
+    auto e = jobs.end();
+    auto i = std::find(b, e, ptr);
+    if (i == e)
+      return false;
+    if (i == b)
+      return true;
+    std::rotate(b, i, i + 1);
+    return true;
+
   }
 
   /// Tries to execute a single event.
